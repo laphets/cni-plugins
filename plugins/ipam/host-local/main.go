@@ -103,6 +103,30 @@ func cmdAdd(args *skel.CmdArgs) error {
 			}
 		}
 
+		if requestedIP == nil {
+			// We use last released IP to try first
+			gotIPFromRelease := false
+			for true {
+				lastReleasedIP, err := allocator.LastReleasedIP()
+				if err != nil {
+					break
+				}
+				ipConf, err := allocator.Get(args.ContainerID, args.IfName, lastReleasedIP)
+				if err != nil {
+					continue
+				}
+				allocs = append(allocs, allocator)
+				result.IPs = append(result.IPs, ipConf)
+				gotIPFromRelease = true
+				break
+			}
+
+			if gotIPFromRelease {
+				continue
+			}
+
+		}
+
 		ipConf, err := allocator.Get(args.ContainerID, args.IfName, requestedIP)
 		if err != nil {
 			// Deallocate all already allocated IPs
@@ -151,7 +175,7 @@ func cmdDel(args *skel.CmdArgs) error {
 	for idx, rangeset := range ipamConf.Ranges {
 		ipAllocator := allocator.NewIPAllocator(&rangeset, store, idx)
 
-		err := ipAllocator.Release(args.ContainerID, args.IfName)
+		err := ipAllocator.ReleaseForDel(args.ContainerID, args.IfName)
 		if err != nil {
 			errors = append(errors, err.Error())
 		}

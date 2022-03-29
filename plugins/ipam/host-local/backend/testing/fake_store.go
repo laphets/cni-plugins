@@ -94,3 +94,10 @@ func (s *FakeStore) GetByID(id string, ifname string) []net.IP {
 func (s *FakeStore) SetIPMap(m map[string]string) {
 	s.ipMap = m
 }
+
+func (s *FakeStore) RecordRelease(ip net.IP, rangeID string) error {
+	return nil
+}
+func (s *FakeStore) LastReleasedIP(rangeID string) (net.IP, error) {
+	return nil, nil
+}

@@ -41,6 +41,12 @@ func NewIPAllocator(s *RangeSet, store backend.Store, id int) *IPAllocator {
 	}
 }
 
+func (a *IPAllocator) LastReleasedIP() (net.IP, error) {
+	a.store.Lock()
+	defer a.store.Unlock()
+	return a.store.LastReleasedIP(a.rangeID)
+}
+
 // Get allocates an IP
 func (a *IPAllocator) Get(id string, ifname string, requestedIP net.IP) (*current.IPConfig, error) {
 	a.store.Lock()
@@ -122,6 +128,28 @@ func (a *IPAllocator) Release(id string, ifname string) error {
 	defer a.store.Unlock()
 
 	return a.store.ReleaseByID(id, ifname)
+}
+
+// ReleaseForDel clears all IPs allocated for the container with given ID
+// ReleaseForDel will also record the most recent released IP for later assignment
+func (a *IPAllocator) ReleaseForDel(id string, ifname string) error {
+	a.store.Lock()
+	defer a.store.Unlock()
+
+	ips := a.store.GetByID(id, ifname)
+
+	err := a.store.ReleaseByID(id, ifname)
+	if err != nil {
+		return err
+	}
+
+	if ips != nil && len(ips) > 0 {
+		if err := a.store.RecordRelease(ips[0], a.rangeID); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 type RangeIter struct {

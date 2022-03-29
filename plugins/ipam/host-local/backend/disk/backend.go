@@ -15,17 +15,23 @@
 package disk
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend"
 )
 
 const lastIPFilePrefix = "last_reserved_ip."
+const lastReleasedIPFilePrefix = "last_released_ip."
 const LineBreak = "\r\n"
 
 var defaultDataDir = "/var/lib/cni/networks"
@@ -92,6 +98,62 @@ func (s *Store) LastReservedIP(rangeID string) (net.IP, error) {
 		return nil, err
 	}
 	return net.ParseIP(string(data)), nil
+}
+
+type IPStore struct {
+	IPList []string `json:"ip"`
+	Log    []string `json:"log"`
+}
+
+// LastReleasedIP pop the last Released IP if exisits
+func (s *Store) LastReleasedIP(rangeID string) (net.IP, error) {
+	ipfile := GetEscapedPath(s.dataDir, lastReleasedIPFilePrefix+rangeID)
+	data, err := ioutil.ReadFile(ipfile)
+	if err != nil {
+		return nil, err
+	}
+	ipStore := &IPStore{}
+	if err := json.Unmarshal(data, ipStore); err != nil {
+		return nil, err
+	}
+	if len(ipStore.IPList) == 0 {
+		return nil, errors.New("no available released IP")
+	}
+	sort.Slice(ipStore.IPList, func(i, j int) bool {
+		s1 := strings.Split(ipStore.IPList[i], ".")
+		s2 := strings.Split(ipStore.IPList[j], ".")
+		i1, _ := strconv.Atoi(s1[len(s1)-1])
+		i2, _ := strconv.Atoi(s2[len(s2)-1])
+		return i1 > i2
+	})
+	ip := net.ParseIP(string(ipStore.IPList[0]))
+	ipStore.Log = append(ipStore.Log, fmt.Sprintf("Assign IP from release: %s, cur: %+v", ipStore.IPList[0], ipStore.IPList))
+	ipStore.IPList = ipStore.IPList[1:] // pop
+	new, err := json.MarshalIndent(ipStore, "", "    ")
+	if err != nil {
+		return nil, err
+	}
+	if err := ioutil.WriteFile(ipfile, new, 0644); err != nil {
+		return nil, err
+	}
+	return ip, nil
+}
+
+func (s *Store) RecordRelease(ip net.IP, rangeID string) error {
+	// store the reserved ip in lastIPFile
+	ipfile := GetEscapedPath(s.dataDir, lastReleasedIPFilePrefix+rangeID)
+	ipStore := &IPStore{}
+	data, err := ioutil.ReadFile(ipfile)
+	if err == nil {
+		_ = json.Unmarshal(data, ipStore)
+	}
+	ipStore.IPList = append(ipStore.IPList, ip.String())
+	ipStore.Log = append(ipStore.Log, fmt.Sprintf("RecordRelease: %s, cur: %+v", ip.String(), ipStore.IPList))
+	new, err := json.MarshalIndent(ipStore, "", "    ")
+	if err != nil {
+		return err
+	}
+	return ioutil.WriteFile(ipfile, new, 0644)
 }
 
 func (s *Store) Release(ip net.IP) error {
